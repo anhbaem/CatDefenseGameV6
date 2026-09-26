@@ -14,10 +14,11 @@ jobs:
           "https://www.dropbox.com/scl/fi/l43wd9swz1z6zgjm3n14h/CatDefenseGameSourceV6_FULL.zip?rlkey=b75g28zfflw01xcdcg7s1e82y&st=3g5bisb1&dl=1" \
           -o source.zip
 
+          mkdir -p source
           unzip -q source.zip -d source
 
-          echo "Source extracted:"
-          find source -maxdepth 3 -type f | head -50
+          echo "=== ZIP CONTENT ==="
+          find source -maxdepth 5 -type f | head -100
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -31,9 +32,7 @@ jobs:
           export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "SDK Manager:"
+          echo "Android SDK:"
           sdkmanager --version
 
           yes | sdkmanager --licenses >/dev/null || true
@@ -52,18 +51,48 @@ jobs:
           unzip -q gradle.zip -d "$HOME"
           echo "$HOME/gradle-8.7/bin" >> "$GITHUB_PATH"
 
-      - name: Locate project
+      - name: Find Android project
         run: |
-          find source -name settings.gradle -o -name settings.gradle.kts
+          PROJECT_FILE=$(find "$GITHUB_WORKSPACE/source" \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: Cannot find settings.gradle"
+            echo "=== ALL FILES ==="
+            find "$GITHUB_WORKSPACE/source" -type f
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
-          cd source/CatDefenseGameSource
+          echo "Building project:"
+          echo "$PROJECT_DIR"
+
+          cd "$PROJECT_DIR"
+
           gradle --no-daemon assembleDebug
+
+      - name: Find APK
+        run: |
+          echo "=== APK FILES ==="
+
+          find "$GITHUB_WORKSPACE/source" \
+            -type f \
+            -name "*.apk" \
+            -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: CatDefenseGameV6-APK
-          path: source/CatDefenseGameSource/app/build/outputs/apk/debug/*.apk
+          path: source/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
