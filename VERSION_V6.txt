@@ -1,0 +1,15 @@
+Cat Defense Game Source V6
+
+Based on V5 and the original Craftpix runtime asset set.
+
+V6 additions:
+- Correct Enemy/Boss Walk, Attack and Dead asset state selection.
+- Cat Idle/Shoot only; no nonexistent Cat Dead asset lookup.
+- Five cat skill archetypes across 15 cats.
+- Projectile variants with different damage multipliers.
+- Boss area skill with explosion effect.
+- Existing offline progression, save, shop, level map, pause and focus targeting retained.
+
+No audio files were found in the supplied asset set. Sound/Vibration are persisted UI settings.
+
+APK compilation was not verified because the generation environment lacks a complete Android SDK/Gradle toolchain.
