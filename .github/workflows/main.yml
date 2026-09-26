@@ -8,17 +8,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download source from Dropbox
+      - name: Download clean source from Dropbox
         run: |
+          set -e
+
           curl -L --fail --retry 3 \
-          "https://www.dropbox.com/scl/fi/l43wd9swz1z6zgjm3n14h/CatDefenseGameSourceV6_FULL.zip?rlkey=b75g28zfflw01xcdcg7s1e82y&st=3g5bisb1&dl=1" \
+          "https://www.dropbox.com/scl/fi/3ql18oy0tdpxzypc4nhnz/CatDefenseGameSourceV6_CLEAN.zip?rlkey=oj7qyr2p4jaemv848u2lv3rdp&st=a9decllv&dl=1" \
           -o source.zip
+
+          echo "=== ZIP ==="
+          ls -lh source.zip
+          unzip -t source.zip
 
           mkdir -p source
           unzip -q source.zip -d source
-
-          echo "=== ZIP CONTENT ==="
-          find source -maxdepth 5 -type f | head -100
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -28,11 +31,12 @@ jobs:
 
       - name: Setup Android SDK
         run: |
+          set -e
+
           export ANDROID_HOME=/usr/local/lib/android/sdk
           export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-          echo "Android SDK:"
           sdkmanager --version
 
           yes | sdkmanager --licenses >/dev/null || true
@@ -44,38 +48,47 @@ jobs:
 
       - name: Install Gradle
         run: |
+          set -e
+
           curl -L --fail \
           https://services.gradle.org/distributions/gradle-8.7-bin.zip \
           -o gradle.zip
 
           unzip -q gradle.zip -d "$HOME"
+
           echo "$HOME/gradle-8.7/bin" >> "$GITHUB_PATH"
 
       - name: Find Android project
         run: |
+          set -e
+
           PROJECT_FILE=$(find "$GITHUB_WORKSPACE/source" \
             -type f \
             \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
             -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: Cannot find settings.gradle"
-            echo "=== ALL FILES ==="
-            find "$GITHUB_WORKSPACE/source" -type f
+            echo "ERROR: settings.gradle not found"
+            echo "=== FILES ==="
+            find "$GITHUB_WORKSPACE/source" -maxdepth 5 -type f -print
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
 
-          echo "Android project found:"
+          echo "Android project:"
           echo "$PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+      - name: Show project
+        run: |
+          echo "PROJECT_DIR=$PROJECT_DIR"
+          find "$PROJECT_DIR" -maxdepth 3 -type f -print
+
       - name: Build APK
         run: |
-          echo "Building project:"
-          echo "$PROJECT_DIR"
+          set -e
 
           cd "$PROJECT_DIR"
 
@@ -83,7 +96,7 @@ jobs:
 
       - name: Find APK
         run: |
-          echo "=== APK FILES ==="
+          echo "=== APK ==="
 
           find "$GITHUB_WORKSPACE/source" \
             -type f \
