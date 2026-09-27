@@ -28,17 +28,22 @@ jobs:
 
       - name: Detect Android project root
         run: |
-          ROOT=$(find project -type f \
+          SETTINGS=$(find project -type f \
             \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -printf '%h\\n' | head -n 1)
+            -print -quit)
 
-          if [ -z "$ROOT" ]; then
+          if [ -z "$SETTINGS" ]; then
             echo "::error::Không tìm thấy settings.gradle/settings.gradle.kts"
+            find project -maxdepth 4 -type f -print
             exit 1
           fi
 
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+          ROOT=$(dirname "$SETTINGS")
+
+          echo "Settings file: $SETTINGS"
           echo "Project root: $ROOT"
+
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -51,9 +56,18 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Show project files
+        run: |
+          echo "Project root:"
+          echo "$PROJECT_ROOT"
+          echo ""
+          echo "Files:"
+          find "$PROJECT_ROOT" -maxdepth 3 -type f | sort
+
       - name: Build Debug APK
         run: |
           cd "$PROJECT_ROOT"
+
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --stacktrace --no-daemon
@@ -63,6 +77,7 @@ jobs:
 
       - name: Find APK
         run: |
+          echo "APK files:"
           find "$PROJECT_ROOT" -type f -name "*.apk" -print
 
       - name: Upload APK
