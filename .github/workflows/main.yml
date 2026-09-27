@@ -12,7 +12,7 @@ jobs:
       - name: Download project from Dropbox
         run: |
           curl -fL --retry 3 --retry-delay 2 \
-            "https://www.dropbox.com/scl/fi/yr79ms5l93afbmzl36yhr/CatDefenseGameV10_8_MAP_REFERENCE_FIXED.zip?rlkey=iieojmxlevaeu5igqsk7fegwc&st=94q1jjg9&dl=1" \
+            "https://www.dropbox.com/scl/fi/ytjdj620h6wojaj3ixs48/CatDefenseGameV10_9_4_BATTLE_BUTTON_ICON_HP_FIXED.zip?rlkey=aowu3f5fnrfgqjm9d9lirheox&st=i2zr6b5e&dl=1" \
             -o CatDefenseGame.zip
 
       - name: Check downloaded ZIP
@@ -23,6 +23,7 @@ jobs:
 
       - name: Extract project
         run: |
+          rm -rf project
           mkdir project
           unzip -q CatDefenseGame.zip -d project
 
@@ -34,15 +35,12 @@ jobs:
 
           if [ -z "$SETTINGS" ]; then
             echo "::error::Không tìm thấy settings.gradle/settings.gradle.kts"
-            find project -maxdepth 4 -type f -print
+            find project -maxdepth 5 -type f -print
             exit 1
           fi
 
           ROOT=$(dirname "$SETTINGS")
-
-          echo "Settings file: $SETTINGS"
           echo "Project root: $ROOT"
-
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Setup JDK 17
@@ -55,14 +53,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-
-      - name: Show project files
-        run: |
-          echo "Project root:"
-          echo "$PROJECT_ROOT"
-          echo ""
-          echo "Files:"
-          find "$PROJECT_ROOT" -maxdepth 3 -type f | sort
 
       - name: Build Debug APK
         run: |
@@ -77,13 +67,12 @@ jobs:
 
       - name: Find APK
         run: |
-          echo "APK files:"
           find "$PROJECT_ROOT" -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CatDefenseGame-MAP-FIXED-APK
+          name: CatDefenseGame-V10.9.4-APK
           path: |
-            ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*.apk
+            ${ env.PROJECT_ROOT }/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
