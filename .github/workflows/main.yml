@@ -24,7 +24,7 @@ jobs:
       - name: Extract project
         run: |
           rm -rf project
-          mkdir project
+          mkdir -p project
           unzip -q CatDefenseGame.zip -d project
 
       - name: Detect Android project root
@@ -65,14 +65,29 @@ jobs:
             gradle assembleDebug --stacktrace --no-daemon
           fi
 
-      - name: Find APK
+      - name: Find and prepare APK artifact
         run: |
+          echo "APK files found:"
           find "$PROJECT_ROOT" -type f -name "*.apk" -print
+
+          APK=$(find "$PROJECT_ROOT" -type f -path "*/app/build/outputs/apk/debug/*.apk" -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "::error::Không tìm thấy APK debug"
+            find "$PROJECT_ROOT" -type f -name "*.apk" -print
+            exit 1
+          fi
+
+          echo "Using APK: $APK"
+          rm -rf apk-output
+          mkdir -p apk-output
+          cp "$APK" apk-output/CatDefenseGame-debug.apk
+
+          ls -lh apk-output/CatDefenseGame-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: CatDefenseGame-V10.9.4-APK
-          path: |
-            ${ env.PROJECT_ROOT }/app/build/outputs/apk/debug/*.apk
+          path: apk-output/CatDefenseGame-debug.apk
           if-no-files-found: error
