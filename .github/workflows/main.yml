@@ -1,70 +1,89 @@
-name: Build CatDefenseGame APK
+name: Download from Dropbox and Build APK
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Download from Dropbox and Build APK
+    name: Build CatDefenseGame APK
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Download project
       - name: Download project from Dropbox
         run: |
           curl -L \
             "https://www.dropbox.com/scl/fi/oyka58xcebnorcu1t2el5/CatDefenseGameV11_8_TABS_MAP_FRAME_FIXED.zip?rlkey=tfygoig558m3udtgytr0n2zvw&st=25xtol1j&dl=1" \
             -o CatDefenseGame.zip
 
+      # 2. Check ZIP
       - name: Check downloaded ZIP
         run: |
           ls -lh CatDefenseGame.zip
           file CatDefenseGame.zip
+          unzip -t CatDefenseGame.zip
 
+      # 3. Extract
       - name: Extract project
         run: |
           mkdir project
           unzip -q CatDefenseGame.zip -d project
 
+      # 4. Find Android project
       - name: Find Gradle project
         run: |
           echo "Project contents:"
-          find project -maxdepth 3 -type f \( -name "gradlew" -o -name "settings.gradle*" -o -name "build.gradle*" \) -print
+          find project -maxdepth 4 -type f \
+            \( -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            -o -name "build.gradle" \
+            -o -name "build.gradle.kts" \
+            -o -name "gradlew" \) \
+            -print
 
+      # 5. Detect project root
       - name: Detect project root
         run: |
-          ROOT=$(find project -type f -name "gradlew" -printf '%h\n' | head -n 1)
+          ROOT=$(find project -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -printf '%h\n' | head -n 1)
 
           if [ -z "$ROOT" ]; then
-            echo "Không tìm thấy gradlew"
+            echo "Không tìm thấy settings.gradle"
             exit 1
           fi
 
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "Project root: $ROOT"
 
+      # 6. Setup JDK 17
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+      # 7. Setup Gradle
+      # Project không có gradlew nên cài Gradle trực tiếp
+      - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
 
-      - name: Make Gradle executable
-        run: |
-          chmod +x "$PROJECT_ROOT/gradlew"
-
+      # 8. Build
       - name: Build Debug APK
         run: |
           cd "$PROJECT_ROOT"
-          ./gradlew assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace --no-daemon
 
+      # 9. Find APK
       - name: Find APK
         run: |
           echo "APK files:"
           find "$PROJECT_ROOT" -type f -name "*.apk" -print
 
+      # 10. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
