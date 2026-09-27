@@ -12,7 +12,7 @@ jobs:
       - name: Download project from Dropbox
         run: |
           curl -fL --retry 3 --retry-delay 2 \
-            "https://www.dropbox.com/scl/fi/h7p0nc51w5yfu5rwlcy2o/CatDefenseGameV10_8_MAP_REFERENCE_FIXED.zip?rlkey=n0lfz95rwx5aa8hv15w961oe&st=mmt3ovnv&dl=1" \
+            "https://www.dropbox.com/scl/fi/yr79ms5l93afbmzl36yhr/CatDefenseGameV10_8_MAP_REFERENCE_FIXED.zip?rlkey=iieojmxlevaeu5igqsk7fegwc&st=94q1jjg9&dl=1" \
             -o CatDefenseGame.zip
 
       - name: Check downloaded ZIP
@@ -54,7 +54,6 @@ jobs:
       - name: Build Debug APK
         run: |
           cd "$PROJECT_ROOT"
-
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --stacktrace --no-daemon
@@ -69,7 +68,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CatDefenseGame-V10.8-MAP-FIXED-APK
+          name: CatDefenseGame-MAP-FIXED-APK
           path: |
             ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
