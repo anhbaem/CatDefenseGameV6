@@ -4,12 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       dropbox_url:
-        description: "Dropbox ZIP URL của source game"
+        description: "Dropbox ZIP URL"
         required: true
         type: string
-
       build_type:
-        description: "Chọn loại APK"
+        description: "Build type"
         required: true
         default: "debug"
         type: choice
@@ -26,21 +25,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ==========================================
-      # 1. TẢI SOURCE TỪ DROPBOX
-      # ==========================================
       - name: Download project from Dropbox
         env:
           DROPBOX_URL: ${{ inputs.dropbox_url }}
         run: |
           set -e
-
           URL="$DROPBOX_URL"
 
-          # Dropbox dl=0 -> dl=1
+          # Convert Dropbox shared link to direct download mode.
           URL="${URL/dl=0/dl=1}"
-
-          # Nếu chưa có dl=
           if [[ "$URL" != *"dl="* ]]; then
             if [[ "$URL" == *"?"* ]]; then
               URL="${URL}&dl=1"
@@ -49,56 +42,39 @@ jobs:
             fi
           fi
 
-          echo "Downloading source..."
-          echo "$URL"
+          echo "Downloading project..."
+          curl -fL --retry 5 --retry-delay 3 --retry-all-errors \
+            "$URL" -o CatDefenseGame.zip
 
-          curl -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --retry-all-errors \
-            "$URL" \
-            -o CatDefenseGame.zip
-
-          echo "Downloaded:"
+          echo "Downloaded file:"
           ls -lh CatDefenseGame.zip
 
-      # ==========================================
-      # 2. KIỂM TRA ZIP
-      # ==========================================
       - name: Check downloaded ZIP
         run: |
           set -e
-
           file CatDefenseGame.zip
-
-          echo "Testing ZIP..."
           unzip -t CatDefenseGame.zip
 
-      # ==========================================
-      # 3. GIẢI NÉN SOURCE
-      # ==========================================
       - name: Extract project
         run: |
           set -e
-
           rm -rf project
           mkdir -p project
-
           unzip -q CatDefenseGame.zip -d project
 
-          echo "Extracted project:"
+          echo "Project files:"
           find project -maxdepth 5 -type f | sort | head -300
 
-      # ==========================================
-      # 4. TÌM ROOT ANDROID PROJECT
-      # ==========================================
       - name: Detect Android project root
         run: |
           set -e
 
-          SETTINGS=$(find project -type f \
-            -name "settings.gradle" -o -name "settings.gradle.kts" \
-            -print -quit)
+          # Avoid escaped find expressions so this step is robust in GitHub Actions.
+          SETTINGS=$(find project -type f -name "settings.gradle" -print -quit)
+
+          if [ -z "$SETTINGS" ]; then
+            SETTINGS=$(find project -type f -name "settings.gradle.kts" -print -quit)
+          fi
 
           if [ -z "$SETTINGS" ]; then
             echo "::error::Không tìm thấy settings.gradle hoặc settings.gradle.kts"
@@ -108,4 +84,116 @@ jobs:
 
           ROOT=$(dirname "$SETTINGS")
 
-          echo "Android
+          echo "Android project root:"
+          echo "$ROOT"
+
+          if [ ! -f "$ROOT/app/build.gradle" ] && [ ! -f "$ROOT/app/build.gradle.kts" ]; then
+            echo "::error::Không tìm thấy app/build.gradle hoặc app/build.gradle.kts"
+            find "$ROOT" -maxdepth 5 -type f | sort
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -e
+          yes | sdkmanager --licenses || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Setup Gradle 8.7
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.7"
+
+      - name: Check Gradle
+        run: |
+          set -e
+          cd "$PROJECT_ROOT"
+
+          echo "Project root:"
+          pwd
+
+          echo "Project files:"
+          ls -la
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --version
+          else
+            gradle --version
+          fi
+
+      - name: Build Debug APK
+        if: ${{ inputs.build_type == 'debug' }}
+        run: |
+          set -e
+          cd "$PROJECT_ROOT"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace --no-daemon
+          else
+            gradle assembleDebug --stacktrace --no-daemon
+          fi
+
+      - name: Build Release APK
+        if: ${{ inputs.build_type == 'release' }}
+        run: |
+          set -e
+          cd "$PROJECT_ROOT"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleRelease --stacktrace --no-daemon
+          else
+            gradle assembleRelease --stacktrace --no-daemon
+          fi
+
+      - name: Find APK
+        run: |
+          set -e
+
+          echo "Searching for APK..."
+          find "$PROJECT_ROOT" -type f -name "*.apk" -print
+
+          if [ "${{ inputs.build_type }}" = "debug" ]; then
+            APK=$(find "$PROJECT_ROOT" -type f -path "*/app/build/outputs/apk/debug/*.apk" -print -quit)
+          else
+            APK=$(find "$PROJECT_ROOT" -type f -path "*/app/build/outputs/apk/release/*.apk" -print -quit)
+          fi
+
+          if [ -z "$APK" ]; then
+            echo "::error::Không tìm thấy APK!"
+            find "$PROJECT_ROOT" -type f -path "*/build/outputs/*" -print || true
+            exit 1
+          fi
+
+          echo "APK found:"
+          echo "$APK"
+
+          rm -rf apk-output
+          mkdir -p apk-output
+          cp "$APK" "apk-output/CatDefenseGame-${{ inputs.build_type }}.apk"
+
+          ls -lh apk-output/
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CatDefenseGame-${{ inputs.build_type }}-APK
+          path: apk-output/CatDefenseGame-${{ inputs.build_type }}.apk
+          if-no-files-found: error
+          retention-days: 14
