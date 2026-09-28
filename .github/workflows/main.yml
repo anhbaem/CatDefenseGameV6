@@ -1,90 +1,159 @@
-name: Build CatDefenseGame APK
+name: Build APK from Dropbox
 
 on:
   workflow_dispatch:
     inputs:
       dropbox_url:
-        description: "Dropbox ZIP direct download URL"
-        required: true
+        description: "Dropbox direct/download URL of the source ZIP (leave empty to use DROPBOX_URL secret)"
+        required: false
         type: string
-
       build_type:
-        description: "Build type"
+        description: "APK build type"
         required: true
-        default: "debug"
+        default: "release"
         type: choice
         options:
-          - debug
           - release
-
-permissions:
-  contents: read
+          - debug
+          - both
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ============================================================
-      # 1. DOWNLOAD ZIP FROM DROPBOX
-      # ============================================================
-      - name: Download project ZIP
-        env:
-          DROPBOX_URL: ${{ inputs.dropbox_url }}
+      - name: Prepare workspace
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/source"
+          mkdir -p "$GITHUB_WORKSPACE/apk-output"
 
-          URL="$DROPBOX_URL"
+      - name: Download source ZIP from Dropbox
+        env:
+          DROPBOX_URL: ${{ inputs.dropbox_url || secrets.DROPBOX_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          # Convert Dropbox share URL to direct download
-          if [[ "$URL" == *"dl=0"* ]]; then
-            URL="${URL//dl=0/dl=1}"
-          elif [[ "$URL" != *"dl=1"* ]]; then
-            if [[ "$URL" == *"?"* ]]; then
-              URL="${URL}&dl=1"
-            else
-              URL="${URL}?dl=1"
-            fi
+          if [ -z "${DROPBOX_URL:-}" ]; then
+            echo "::error::No Dropbox URL supplied. Enter a URL in workflow_dispatch or create the DROPBOX_URL repository secret."
+            exit 1
           fi
 
-          echo "Downloading project..."
+          echo "Downloading source ZIP..."
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --output "$GITHUB_WORKSPACE/source/project.zip" \
+            "$DROPBOX_URL"
 
-          curl \
-            -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --retry-all-errors \
-            "$URL" \
-            -o project.zip
+          if [ ! -s "$GITHUB_WORKSPACE/source/project.zip" ]; then
+            echo "::error::Downloaded ZIP is empty."
+            exit 1
+          fi
 
-          echo "Downloaded:"
-          ls -lh project.zip
+          file "$GITHUB_WORKSPACE/source/project.zip"
 
-          echo "Checking ZIP..."
-          file project.zip
-          unzip -t project.zip
-
-
-      # ============================================================
-      # 2. EXTRACT ZIP
-      # ============================================================
-      - name: Extract project
+      - name: Extract source
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          rm -rf project
-          mkdir -p project
-
-          unzip -q project.zip -d project
+          cd "$GITHUB_WORKSPACE/source"
+          unzip -q project.zip -d extracted
 
           echo "Extracted files:"
-          find project -maxdepth 6 -type f | sort | head -300
+          find extracted -maxdepth 3 -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -print
 
-
-      # ============================================================
-      # 3. FIND ACTUAL ANDROID PROJECT ROOT
-      # ============================================================
-      - name: Detect Android project root
+      - name: Locate Android project
+        id: project
+        shell: bash
         run: |
-          set -
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE/source/extracted"
+
+          PROJECT_SETTINGS="$(find "$ROOT" -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print -quit)"
+
+          if [ -z "$PROJECT_SETTINGS" ]; then
+            echo "::error::Could not find settings.gradle or settings.gradle.kts in the Dropbox ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_SETTINGS")"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Android project: $PROJECT_DIR"
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "::error::The located Gradle project does not contain an app/ module."
+            exit 1
+          fi
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Show build environment
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          gradle --version
+          echo "Gradle project:"
+          ls -la
+
+      - name: Build release APK
+        if: ${{ inputs.build_type == 'release' || inputs.build_type == 'both' }}
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace assembleRelease
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/apk-output/" || true
+
+      - name: Build debug APK
+        if: ${{ inputs.build_type == 'debug' || inputs.build_type == 'both' }}
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace assembleDebug
+          cp app/build/outputs/apk/debug/*.apk "$GITHUB_WORKSPACE/apk-output/" || true
+
+      - name: Collect all APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROJECT_DIR="${{ steps.project.outputs.project_dir }}"
+
+          find "$PROJECT_DIR/app/build/outputs/apk" -type f -name "*.apk" \
+            -exec cp {} "$GITHUB_WORKSPACE/apk-output/" \; 2>/dev/null || true
+
+          echo "APK files:"
+          find "$GITHUB_WORKSPACE/apk-output" -type f -name "*.apk" -print
+
+          if ! find "$GITHUB_WORKSPACE/apk-output" -type f -name "*.apk" | grep -q .; then
+            echo "::error::Build finished but no APK was found."
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CatDefenseGame-APK
+          path: apk-output/*.apk
+          if-no-files-found: error
+          retention-days: 30
