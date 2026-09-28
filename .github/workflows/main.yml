@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       dropbox_url:
-        description: "Dropbox ZIP URL (must point directly to the project ZIP)"
+        description: "Dropbox ZIP URL của source game"
         required: true
         type: string
 
       build_type:
-        description: "Build type"
+        description: "Chọn loại APK"
         required: true
         default: "debug"
         type: choice
@@ -20,38 +20,27 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: cat-defense-build-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
     name: Download Dropbox ZIP and Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout workflow repository
-        uses: actions/checkout@v4
-
-      - name: Show environment
-        run: |
-          set -euxo pipefail
-          echo "Runner: $(uname -a)"
-          java -version || true
-          git --version
-
+      # ==========================================
+      # 1. TẢI SOURCE TỪ DROPBOX
+      # ==========================================
       - name: Download project from Dropbox
         env:
           DROPBOX_URL: ${{ inputs.dropbox_url }}
         run: |
-          set -euo pipefail
+          set -e
 
           URL="$DROPBOX_URL"
 
-          # Convert normal Dropbox share links to direct-download links.
+          # Dropbox dl=0 -> dl=1
           URL="${URL/dl=0/dl=1}"
 
+          # Nếu chưa có dl=
           if [[ "$URL" != *"dl="* ]]; then
             if [[ "$URL" == *"?"* ]]; then
               URL="${URL}&dl=1"
@@ -60,200 +49,63 @@ jobs:
             fi
           fi
 
-          echo "Downloading project ZIP from Dropbox..."
-          curl -fL             --retry 5             --retry-delay 3             --retry-all-errors             --connect-timeout 30             --max-time 600             "$URL"             -o CatDefenseGame.zip
+          echo "Downloading source..."
+          echo "$URL"
 
-          test -s CatDefenseGame.zip
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            --retry-all-errors \
+            "$URL" \
+            -o CatDefenseGame.zip
+
+          echo "Downloaded:"
           ls -lh CatDefenseGame.zip
 
-      - name: Validate ZIP
+      # ==========================================
+      # 2. KIỂM TRA ZIP
+      # ==========================================
+      - name: Check downloaded ZIP
         run: |
-          set -euo pipefail
+          set -e
 
           file CatDefenseGame.zip
+
+          echo "Testing ZIP..."
           unzip -t CatDefenseGame.zip
 
-          # Reject a common Dropbox error page accidentally downloaded as .zip.
-          if ! unzip -t CatDefenseGame.zip >/dev/null 2>&1; then
-            echo "::error::Downloaded file is not a valid ZIP."
-            exit 1
-          fi
-
+      # ==========================================
+      # 3. GIẢI NÉN SOURCE
+      # ==========================================
       - name: Extract project
         run: |
-          set -euo pipefail
+          set -e
 
           rm -rf project
           mkdir -p project
+
           unzip -q CatDefenseGame.zip -d project
 
-          echo "Extracted files:"
-          find project -maxdepth 4 -type f | sort | head -300
+          echo "Extracted project:"
+          find project -maxdepth 5 -type f | sort | head -300
 
+      # ==========================================
+      # 4. TÌM ROOT ANDROID PROJECT
+      # ==========================================
       - name: Detect Android project root
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
-          SETTINGS="$(find project -type f \(             -name 'settings.gradle'             -o -name 'settings.gradle.kts'           \) -print -quit)"
+          SETTINGS=$(find project -type f \
+            -name "settings.gradle" -o -name "settings.gradle.kts" \
+            -print -quit)
 
-          if [[ -z "$SETTINGS" ]]; then
-            echo "::error::Không tìm thấy settings.gradle hoặc settings.gradle.kts."
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::Không tìm thấy settings.gradle hoặc settings.gradle.kts"
             find project -type f | sort
             exit 1
           fi
 
-          ROOT="$(dirname "$SETTINGS")"
+          ROOT=$(dirname "$SETTINGS")
 
-          if [[ ! -f "$ROOT/app/build.gradle" &&                 ! -f "$ROOT/app/build.gradle.kts" ]]; then
-            echo "::error::Không tìm thấy app/build.gradle hoặc app/build.gradle.kts."
-            echo "Detected settings file: $SETTINGS"
-            find "$ROOT" -maxdepth 5 -type f | sort
-            exit 1
-          fi
-
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-
-          echo "Android project root:"
-          echo "$ROOT"
-
-      - name: Check Android project files
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-
-          echo "Project root: $(pwd)"
-          echo
-          echo "Gradle files:"
-          find . -maxdepth 3 -type f \(             -name 'settings.gradle'             -o -name 'settings.gradle.kts'             -o -name 'build.gradle'             -o -name 'build.gradle.kts'             -o -name 'gradle.properties'             -o -name 'gradlew'           \) -print | sort
-
-          echo
-          echo "App files:"
-          find app -maxdepth 3 -type f | sort | head -300
-
-      - name: Setup JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        run: |
-          set -euo pipefail
-
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "8.7"
-
-      - name: Check Gradle wrapper or system Gradle
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-
-          if [[ -f "./gradlew" ]]; then
-            chmod +x ./gradlew
-            ./gradlew --version
-          else
-            echo "No gradlew found; using Gradle 8.7 installed by the workflow."
-            gradle --version
-          fi
-
-      - name: Clean project
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-
-          if [[ -f "./gradlew" ]]; then
-            chmod +x ./gradlew
-            ./gradlew clean --no-daemon --stacktrace
-          else
-            gradle clean --no-daemon --stacktrace
-          fi
-
-      - name: Build Debug APK
-        if: ${{ inputs.build_type == 'debug' }}
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-
-          if [[ -f "./gradlew" ]]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon --stacktrace
-          else
-            gradle assembleDebug --no-daemon --stacktrace
-          fi
-
-      - name: Build Release APK
-        if: ${{ inputs.build_type == 'release' }}
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_ROOT"
-
-          if [[ -f "./gradlew" ]]; then
-            chmod +x ./gradlew
-            ./gradlew assembleRelease --no-daemon --stacktrace
-          else
-            gradle assembleRelease --no-daemon --stacktrace
-          fi
-
-      - name: Find APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Searching for APK files..."
-
-          find "$PROJECT_ROOT"             -type f             -name "*.apk"             -print
-
-          if [[ "${{ inputs.build_type }}" == "debug" ]]; then
-            APK="$(find "$PROJECT_ROOT/app/build/outputs/apk/debug"               -type f -name '*.apk' -print -quit 2>/dev/null || true)"
-          else
-            APK="$(find "$PROJECT_ROOT/app/build/outputs/apk/release"               -type f -name '*.apk' -print -quit 2>/dev/null || true)"
-          fi
-
-          if [[ -z "$APK" ]]; then
-            echo "::error::Không tìm thấy APK!"
-            echo "Build output tree:"
-            find "$PROJECT_ROOT/app/build/outputs" -type f -print 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "APK found:"
-          echo "$APK"
-
-          rm -rf apk-output
-          mkdir -p apk-output
-
-          cp "$APK" "apk-output/CatDefenseGame-${{ inputs.build_type }}.apk"
-
-          ls -lh apk-output/
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CatDefenseGame-${{ inputs.build_type }}-APK
-          path: apk-output/CatDefenseGame-${{ inputs.build_type }}.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Build summary
-        if: always()
-        run: |
-          {
-            echo "## CatDefenseGame Build"
-            echo ""
-            echo "- Build type: \`${{ inputs.build_type }}\`"
-            echo "- Source: Dropbox ZIP supplied at workflow run time"
-            echo "- JDK: 17"
-            echo "- Android SDK: API 35"
-            echo "- Gradle: 8.7"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Android
