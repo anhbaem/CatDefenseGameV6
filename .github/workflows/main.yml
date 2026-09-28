@@ -12,7 +12,7 @@ jobs:
       - name: Download project from Dropbox
         run: |
           curl -fL --retry 3 --retry-delay 2 \
-            "https://www.dropbox.com/scl/fi/jmyqgr2d25qgab6yfdlct/CatDefenseGameV10_10_0_5LANE_GAMEPLAY_VERSION_SYNC.zip?rlkey=9cjekzvx75dbopqi16jmjogpz&st=0r4kpnn6&dl=1" \
+            "https://www.dropbox.com/scl/fi/5vl275623hzctxtvub417/CatDefenseGameV10_10_3_NO_CAT_RANGE_AUTO_ATTACK.zip?rlkey=gknh4h98ha56ks42475j9d8a4&st=rmv7e288&dl=1" \
             -o CatDefenseGame.zip
 
       - name: Check downloaded ZIP
