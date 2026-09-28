@@ -2,6 +2,23 @@ name: Build CatDefenseGame APK
 
 on:
   workflow_dispatch:
+    inputs:
+      dropbox_url:
+        description: "Dropbox ZIP URL"
+        required: true
+        type: string
+
+      build_type:
+        description: "Build type"
+        required: true
+        default: "debug"
+        type: choice
+        options:
+          - debug
+          - release
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -9,85 +26,67 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==============================
+      # 1. Download project from Dropbox
+      # ==============================
       - name: Download project from Dropbox
+        env:
+          DROPBOX_URL: ${{ inputs.dropbox_url }}
         run: |
-          curl -fL --retry 3 --retry-delay 2 \
-            "https://www.dropbox.com/scl/fi/5vl275623hzctxtvub417/CatDefenseGameV10_10_3_NO_CAT_RANGE_AUTO_ATTACK.zip?rlkey=gknh4h98ha56ks42475j9d8a4&st=rmv7e288&dl=1" \
+          set -e
+
+          URL="$DROPBOX_URL"
+
+          # Dropbox dl=0 -> dl=1
+          URL="${URL/dl=0/dl=1}"
+
+          # Nếu URL chưa có dl parameter
+          if [[ "$URL" != *"dl="* ]]; then
+            if [[ "$URL" == *"?"* ]]; then
+              URL="${URL}&dl=1"
+            else
+              URL="${URL}?dl=1"
+            fi
+          fi
+
+          echo "Downloading project..."
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            --retry-all-errors \
+            "$URL" \
             -o CatDefenseGame.zip
 
+          echo "Downloaded file:"
+          ls -lh CatDefenseGame.zip
+
+      # ==============================
+      # 2. Check ZIP
+      # ==============================
       - name: Check downloaded ZIP
         run: |
-          ls -lh CatDefenseGame.zip
+          set -e
+
           file CatDefenseGame.zip
+
+          echo "Testing ZIP..."
+
           unzip -t CatDefenseGame.zip
 
+      # ==============================
+      # 3. Extract project
+      # ==============================
       - name: Extract project
         run: |
+          set -e
+
           rm -rf project
+
           mkdir -p project
+
           unzip -q CatDefenseGame.zip -d project
 
-      - name: Detect Android project root
-        run: |
-          SETTINGS=$(find project -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -print -quit)
-
-          if [ -z "$SETTINGS" ]; then
-            echo "::error::Không tìm thấy settings.gradle/settings.gradle.kts"
-            find project -maxdepth 5 -type f -print
-            exit 1
-          fi
-
-          ROOT=$(dirname "$SETTINGS")
-          echo "Project root: $ROOT"
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-
-      - name: Setup JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Gradle 8.7
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.7"
-
-      - name: Build Debug APK
-        run: |
-          cd "$PROJECT_ROOT"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace --no-daemon
-          else
-            gradle assembleDebug --stacktrace --no-daemon
-          fi
-
-      - name: Find and prepare APK artifact
-        run: |
-          echo "APK files found:"
-          find "$PROJECT_ROOT" -type f -name "*.apk" -print
-
-          APK=$(find "$PROJECT_ROOT" -type f -path "*/app/build/outputs/apk/debug/*.apk" -print -quit)
-
-          if [ -z "$APK" ]; then
-            echo "::error::Không tìm thấy APK debug"
-            find "$PROJECT_ROOT" -type f -name "*.apk" -print
-            exit 1
-          fi
-
-          echo "Using APK: $APK"
-          rm -rf apk-output
-          mkdir -p apk-output
-          cp "$APK" apk-output/CatDefenseGame-debug.apk
-
-          ls -lh apk-output/CatDefenseGame-debug.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: CatDefenseGame-V10.9.4-APK
-          path: apk-output/CatDefenseGame-debug.apk
-          if-no-files-found: error
+          echo "Project files:"
+          find project -maxdepth 5 -
