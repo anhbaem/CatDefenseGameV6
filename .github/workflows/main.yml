@@ -12,7 +12,7 @@ jobs:
       - name: Download project from Dropbox
         run: |
           curl -fL --retry 3 --retry-delay 2 \
-            "https://www.dropbox.com/scl/fi/usgpsy904v94yg9t0i7pk/CatDefenseGameV10.zip?rlkey=4ne21eq7zvc6trbwtmas3g4aq&st=90r1nsne&dl=1" \
+            "https://www.dropbox.com/scl/fi/dczy8sna802ux8yeg0hj9/CatDefenseGameV10.zip?rlkey=7f3fzr8l1cncutz5ju99dbbxr&st=mxhypoje&dl=1" \
             -o CatDefenseGame.zip
 
       - name: Check downloaded ZIP
