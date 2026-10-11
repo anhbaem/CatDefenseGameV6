@@ -16,6 +16,7 @@ on:
           - release
           - debug
           - both
+          - aab
 
 jobs:
   build:
@@ -104,13 +105,42 @@ jobs:
         with:
           gradle-version: "8.13"
 
+      - name: Prepare release signing
+        if: ${{ inputs.build_type != 'debug' }}
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::Missing repository secret $v. Release builds must be signed (see SIGNING_README.md)."
+              exit 1
+            fi
+          done
+          echo "$KEYSTORE_BASE64" | base64 --decode > catdefense.jks
+          {
+            echo "storeFile=catdefense.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
       - name: Show build environment
         working-directory: ${{ steps.project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
           java -version
-          gradle --version
+          gradle --version | tee /tmp/gradle_version.txt
+          if ! grep -q "^Gradle 8\.1[3-9]\|^Gradle 8\.[2-9][0-9]" /tmp/gradle_version.txt; then
+            echo "::error::Gradle on PATH is not 8.13+ (AGP 8.13 needs it). Check the 'Set up Gradle' step."
+            exit 1
+          fi
           echo "Gradle project:"
           ls -la
 
@@ -122,6 +152,15 @@ jobs:
           set -euo pipefail
           gradle --no-daemon --stacktrace assembleRelease
           cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/apk-output/" || true
+
+      - name: Build release AAB (Google Play bundle)
+        if: ${{ inputs.build_type == 'aab' }}
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace bundleRelease
+          cp app/build/outputs/bundle/release/*.aab "$GITHUB_WORKSPACE/apk-output/"
 
       - name: Build debug APK
         if: ${{ inputs.build_type == 'debug' || inputs.build_type == 'both' }}
@@ -145,8 +184,8 @@ jobs:
           echo "APK files:"
           find "$GITHUB_WORKSPACE/apk-output" -type f -name "*.apk" -print
 
-          if ! find "$GITHUB_WORKSPACE/apk-output" -type f -name "*.apk" | grep -q .; then
-            echo "::error::Build finished but no APK was found."
+          if ! find "$GITHUB_WORKSPACE/apk-output" -type f \( -name "*.apk" -o -name "*.aab" \) | grep -q .; then
+            echo "::error::Build finished but no APK/AAB was found."
             exit 1
           fi
 
@@ -154,6 +193,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CatDefenseGame-APK
-          path: apk-output/*.apk
+          path: |
+            apk-output/*.apk
+            apk-output/*.aab
           if-no-files-found: error
           retention-days: 30
